@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.*;
@@ -15,19 +16,22 @@ import java.util.*;
 @Service
 public class RepositoryServiceImpl implements RepositoryService {
 
-    @Autowired
-    public RepositoryServiceImpl(GitHubConfig gitHubConfig) {
+    @Autowired(required = true)
+    public RepositoryServiceImpl(GitHubConfig gitHubConfig, RestTemplate restTemplate) {
         this.gitHubConfig = gitHubConfig;
+        this.restTemplate = restTemplate;
     }
+
+    private RestTemplate restTemplate;
 
     private final GitHubConfig gitHubConfig;
 
     @Override
-    public List<Map<String, Object>> getRepositoriesInfo(Object[] repositories) {
-        List<Map<String, Object>> result = new ArrayList<>();
+    public List<Map<String, Object>> getRepositoriesInfo(Object[] repositories) throws IllegalArgumentException {
+        if (repositories.length == 0) return new LinkedList<>();
+        List<Map<String, Object>> result = new LinkedList<>();
         for (Object repository : repositories) {
             Map<String, Object> repoDetails = (Map<String, Object>) repository;
-            //repoDetails.keySet().forEach(System.out::println);
 
             if(!((Boolean) repoDetails.get("fork"))){
                 Map<String, Object> repoInfo = new HashMap<>();
@@ -37,7 +41,6 @@ public class RepositoryServiceImpl implements RepositoryService {
                 Map<String, Object> ownerInfo = (Map<String, Object>)  repoDetails.get("owner");
                 repoInfo.put("Owner Login", ownerInfo.get("login"));
 
-//                System.out.println("Repository Name: " + repoDetails.get("name"));
                 String branchesUrl = (String) repoDetails.get("branches_url");
                 branchesUrl = branchesUrl.replace("{/branch}", "");
 
@@ -46,30 +49,39 @@ public class RepositoryServiceImpl implements RepositoryService {
                 headers.set("Authorization", "token " + accessToken);
                 headers.set("Accept", "application/json");
                 HttpEntity<String> entity = new HttpEntity<>(headers);
-                RestTemplate restTemplate = new RestTemplate();
 
-                ResponseEntity<Object[]> branchesResponse = restTemplate.exchange(branchesUrl, HttpMethod.GET, entity, Object[].class);
-                List<Map<String, Object>> branchesInfo = getBranchesInfo(branchesResponse.getBody());
-                repoInfo.put("Branches", branchesInfo);
+                try{
+                    ResponseEntity<Object[]> branchesResponse = restTemplate.exchange(branchesUrl, HttpMethod.GET, entity, Object[].class);
+                    List<Map<String, Object>> branchesInfo = getBranchesInfo(branchesResponse.getBody());
+                    if(!branchesInfo.isEmpty()) {
+                        repoInfo.put("Branches", branchesInfo);
+                    }
+                    result.add(repoInfo);
 
-                result.add(repoInfo);
+                }catch(HttpClientErrorException.NotFound | HttpClientErrorException.Forbidden |
+                        HttpClientErrorException.TooManyRequests | HttpClientErrorException.BadRequest |
+                        HttpClientErrorException.UnprocessableEntity e){
+                    Object exceptionResponse = e.getResponseBodyAs(Object.class);
+                    Map<String, Object> responseDetails = (Map<String, Object>) exceptionResponse;
+                    throw new IllegalArgumentException(responseDetails.get("message").toString());
+
+                }
+
             }
         }
-
         return result;
     }
 
     public List<Map<String, Object>> getBranchesInfo(Object[] branches){
+        if (branches.length == 0) return new LinkedList<>();
         List<Map<String, Object>> branchesList = new LinkedList<>();
         for (Object branch: branches){
             Map<String, Object> branchesDetails = (Map<String, Object>) branch;
-//            branchesDetails.forEach((key, value) -> System.out.println(key + ": " + value));
 
             Map<String, Object> branchesInfo = new HashMap<>();
             branchesInfo.put("Branch Name", branchesDetails.get("name"));
 
             Map<String, Object> commitInfo = (Map<String, Object>)  branchesDetails.get("commit");
-//            System.out.println("Commit sha: " + commitInfo.get("sha"));
             branchesInfo.put("Commit sha", commitInfo.get("sha"));
 
             branchesList.add(branchesInfo);

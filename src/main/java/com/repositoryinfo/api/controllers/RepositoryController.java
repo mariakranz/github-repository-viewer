@@ -16,10 +16,12 @@ import java.util.Map;
 public class RepositoryController {
 
     @Autowired
-    public RepositoryController(RepositoryService repoService, GitHubConfig gitHubConfig) {
+    public RepositoryController(RepositoryService repoService, GitHubConfig gitHubConfig, RestTemplate restTemplate) {
         this.repoService = repoService;
         this.gitHubConfig = gitHubConfig;
+        this.restTemplate = restTemplate;
     }
+    private RestTemplate restTemplate;
 
     private RepositoryService repoService;
     private final GitHubConfig gitHubConfig;
@@ -29,8 +31,8 @@ public class RepositoryController {
         return HttpStatus.OK;
     }
 
-    @GetMapping("repositories2/{username}")
-    public ResponseEntity<Object> getUserRepositories2(@PathVariable String username){
+    @GetMapping("repositories/{username}")
+    public ResponseEntity<Object> getUserRepositories(@PathVariable String username){
         String url = "https://api.github.com/users/" + username + "/repos";
         String accessToken = gitHubConfig.getGitHubAccessToken();
 
@@ -38,21 +40,35 @@ public class RepositoryController {
         headers.set("Authorization", "token " + accessToken);
         headers.set("Accept", "application/json");
         HttpEntity<String> entity = new HttpEntity<>(headers);
-        RestTemplate restTemplate = new RestTemplate();
 
         try {
             ResponseEntity<Object[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, Object[].class);
             return ResponseEntity.ok(repoService.getRepositoriesInfo(response.getBody()));
-        } catch (HttpClientErrorException.NotFound e) {
+        }catch (HttpClientErrorException.NotFound e) {
             Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", e.getStatusCode().value());                     //404
+            errorResponse.put("status", e.getStatusCode().value());
             errorResponse.put("message", "User not found");
             return ResponseEntity.status(e.getStatusCode()).body(errorResponse);
-        } catch (Exception e) {
+        }catch (HttpClientErrorException.Forbidden | HttpClientErrorException.TooManyRequests e)  {                                //403
             Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());      //500
-            errorResponse.put("message", "Unexpected error");
-            return ResponseEntity.status((HttpStatusCode) errorResponse.get("status")).body(errorResponse);
+            errorResponse.put("status", e.getStatusCode().value());
+            errorResponse.put("message", "Rate limit error");
+            return ResponseEntity.status(e.getStatusCode()).body(errorResponse);
+        }catch (HttpClientErrorException.BadRequest | HttpClientErrorException.UnprocessableEntity e){
+            Object exceptionResponse = e.getResponseBodyAs(Object.class);
+            Map<String, Object> responseDetails = (Map<String, Object>) exceptionResponse;
+
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", e.getStatusCode().value());
+            errorResponse.put("message", responseDetails.get("message"));
+            return ResponseEntity.status(e.getStatusCode()).body(errorResponse);
+        }catch (IllegalArgumentException e){
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", HttpStatus.BAD_REQUEST.value());
+            errorResponse.put("message", "Error executing branches request");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
         }
+
     }
 }
+
