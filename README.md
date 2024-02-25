@@ -44,8 +44,8 @@ Successful Response
   "Owner Login": "example-user",
   "Branches": [
     {
-      "Commit sha": "abc123",
-      "Branch Name": "main"
+      "Branch Name": "main",
+      "Commit sha": "abc123"
     },
     {
       "Branch Name": "feature-branch",
